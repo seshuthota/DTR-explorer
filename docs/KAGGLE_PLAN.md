@@ -59,7 +59,23 @@ Higher quality (slower) option:
   bash scripts/kaggle/20_train_sft.sh
 ```
 
-## 6) Upload Weights to Hugging Face
+## 6) Merge LoRA and Compare vs Base
+Merge uploaded adapter into standalone weights:
+```bash
+!ADAPTER_ID=CuriousDragon/dtr-tuned-1.2b-DTR-lora \
+  OUT_DIR=models/dtr-tuned-1.2b-DTR-merged \
+  bash scripts/kaggle/25_merge_lora.sh
+```
+
+Run before/after comparison:
+```bash
+!BASE_MODEL_ID=DavidAU/LFM2.5-1.2B-Thinking-Claude-4.6-Opus-Heretic-Uncensored-DISTILL \
+  MERGED_MODEL_ID=models/dtr-tuned-1.2b-DTR-merged \
+  QUESTIONS=12 N=16 MAX_NEW_TOKENS=384 \
+  bash scripts/kaggle/31_compare_base_vs_merged.sh
+```
+
+## 7) Upload Weights to Hugging Face
 ```python
 import os
 os.environ["HF_TOKEN"] = "hf_xxx"
@@ -71,7 +87,7 @@ os.environ["HF_TOKEN"] = "hf_xxx"
   bash scripts/kaggle/40_upload_hf.sh
 ```
 
-## 7) Optional Eval
+## 8) Optional Eval
 ```bash
 !MODEL_ID=models/dtr-tuned-1.2b-kaggle bash scripts/kaggle/30_eval.sh
 ```
