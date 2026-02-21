@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+
+# Virtual environments
+.venv/
+.venv-*/
+venv/
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/
+
+# Project outputs and caches
+outputs/
+models/
+
+# Data artifacts
+*.jsonl
+*.csv
+
+# Optional local env files
+.env
