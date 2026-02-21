@@ -33,11 +33,25 @@ Default settings (editable via env vars):
 - `MAX_NEW_TOKENS=320`
 - `MIN_DTR=0.32`
 - `KEEP_PER_Q=4`
-- filters: `--require-correct --fallback-best-correct`
+- `REQUIRE_CORRECT=1`
+- `FALLBACK_BEST_CORRECT=1`
 
 Output:
 - `data/dtr_filtered_sft.jsonl`
 - `data/dtr_candidates_debug.csv`
+
+If you want **3,200 generated traces** (200 questions x 16 samples):
+```bash
+QUESTIONS=200 SAMPLES_PER_Q=16 SAMPLE_BATCH_SIZE=2 RESUME=1 \
+bash scripts/runpod/10_generate_dataset.sh
+```
+
+If you want to keep close to **3,200 rows for training** (less strict quality filter):
+```bash
+QUESTIONS=200 SAMPLES_PER_Q=16 KEEP_PER_Q=16 MIN_DTR=0.0 \
+REQUIRE_CORRECT=0 FALLBACK_BEST_CORRECT=0 SAMPLE_BATCH_SIZE=2 RESUME=1 \
+bash scripts/runpod/10_generate_dataset.sh
+```
 
 ## 3) Train LoRA Adapters (QLoRA)
 ```bash
@@ -52,7 +66,17 @@ Default training profile:
 Output:
 - `models/dtr-tuned-1.2b-v1` (LoRA adapter)
 
-## 4) Post-Train Validation
+## 4) Upload Trained Weights to Hugging Face
+```bash
+HF_TOKEN=hf_xxx \
+HF_REPO_ID=username/dtr-tuned-1.2b-v1-lora \
+bash scripts/runpod/40_upload_hf.sh
+```
+Notes:
+- `LOCAL_DIR` defaults to `models/dtr-tuned-1.2b-v1`.
+- This uploads the LoRA adapter folder (recommended for cost and speed).
+
+## 5) Post-Train Validation
 ```bash
 MODEL_ID=models/dtr-tuned-1.2b-v1 bash scripts/runpod/30_eval.sh
 ```
@@ -61,12 +85,19 @@ Outputs:
 - `outputs/len_vs_dtr_posttrain.csv`
 - `outputs/len_vs_dtr_posttrain.png`
 
-## 5) Suggested Profiles
+## 6) Suggested Profiles
 
 ### 24GB profile (recommended)
 ```bash
 QUESTIONS=250 SAMPLES_PER_Q=16 MAX_NEW_TOKENS=320 bash scripts/runpod/10_generate_dataset.sh
 MAX_SEQ_LEN=1024 MICRO_BATCH=2 GRAD_ACCUM=8 bash scripts/runpod/20_train_sft.sh
+```
+
+### 3,200-generation profile (balanced)
+```bash
+QUESTIONS=200 SAMPLES_PER_Q=16 SAMPLE_BATCH_SIZE=2 MAX_NEW_TOKENS=256 \
+MIN_DTR=0.32 KEEP_PER_Q=4 RESUME=1 bash scripts/runpod/10_generate_dataset.sh
+MAX_SEQ_LEN=1024 MICRO_BATCH=1 GRAD_ACCUM=16 EPOCHS=2 bash scripts/runpod/20_train_sft.sh
 ```
 
 ### 6GB fallback profile (slow / fragile)
@@ -75,7 +106,7 @@ QUESTIONS=80 SAMPLES_PER_Q=8 MAX_NEW_TOKENS=192 MIN_DTR=0.30 KEEP_PER_Q=2 bash s
 MAX_SEQ_LEN=512 MICRO_BATCH=1 GRAD_ACCUM=32 LORA_R=8 LORA_ALPHA=16 bash scripts/runpod/20_train_sft.sh
 ```
 
-## 6) Operational Notes
+## 7) Operational Notes
 - Persist `/workspace` or attach a network volume before long runs.
 - If OOM occurs, reduce in order: `MAX_SEQ_LEN`, `MICRO_BATCH`, `LORA_R`, then increase `GRAD_ACCUM`.
 - Keep `data/dtr_candidates_debug.csv` for threshold analysis before retraining.

@@ -61,6 +61,14 @@ python experiments/generate_dtr_dataset.py \
   --require-correct \
   --fallback-best-correct \
   --output data/dtr_filtered_sft.jsonl
+
+# Keep close to full 3,200 rows (200x16), less strict filtering
+python experiments/generate_dtr_dataset.py \
+  --questions 200 \
+  --samples-per-q 16 \
+  --keep-per-q 16 \
+  --min-dtr 0.0 \
+  --output data/dtr_filtered_sft_3200.jsonl
 ```
 
 ## Key Findings
@@ -85,15 +93,29 @@ RunPod-ready files are included for end-to-end dataset generation + QLoRA traini
 - Setup: `scripts/runpod/00_setup.sh`
 - DTR dataset generation: `scripts/runpod/10_generate_dataset.sh`
 - SFT training (LoRA): `scripts/runpod/20_train_sft.sh`
+- Upload artifacts to HF: `scripts/runpod/40_upload_hf.sh`
 - Post-train evaluation: `scripts/runpod/30_eval.sh`
 - Full execution plan: `docs/RUNPOD_PLAN.md`
+
+Google Colab wrappers are also included (15-16GB VRAM friendly defaults):
+
+- Setup: `scripts/colab/00_setup.sh`
+- DTR dataset generation (resume-safe): `scripts/colab/10_generate_dataset.sh`
+- SFT training (LoRA): `scripts/colab/20_train_sft.sh`
+- Upload artifacts to HF: `scripts/colab/40_upload_hf.sh`
+- Post-train evaluation: `scripts/colab/30_eval.sh`
+- Colab execution plan: `docs/COLAB_PLAN.md`
 
 Quick start on RunPod:
 
 ```bash
 bash scripts/runpod/00_setup.sh
 source .venv-runpod/bin/activate
-bash scripts/runpod/10_generate_dataset.sh
+# 3,200 generated traces target (200 x 16)
+QUESTIONS=200 SAMPLES_PER_Q=16 SAMPLE_BATCH_SIZE=2 RESUME=1 bash scripts/runpod/10_generate_dataset.sh
+# Optional: keep near 3,200 rows for training
+QUESTIONS=200 SAMPLES_PER_Q=16 KEEP_PER_Q=16 MIN_DTR=0.0 REQUIRE_CORRECT=0 FALLBACK_BEST_CORRECT=0 SAMPLE_BATCH_SIZE=2 RESUME=1 bash scripts/runpod/10_generate_dataset.sh
 bash scripts/runpod/20_train_sft.sh
+HF_TOKEN=hf_xxx HF_REPO_ID=username/dtr-tuned-1.2b-v1-lora bash scripts/runpod/40_upload_hf.sh
 MODEL_ID=models/dtr-tuned-1.2b-v1 bash scripts/runpod/30_eval.sh
 ```

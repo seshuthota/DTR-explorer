@@ -20,6 +20,7 @@ models/
 # Data artifacts
 *.jsonl
 *.csv
+*.state.json
 
 # Optional local env files
 .env
