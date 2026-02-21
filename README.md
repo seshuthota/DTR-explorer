@@ -106,6 +106,16 @@ Google Colab wrappers are also included (15-16GB VRAM friendly defaults):
 - Post-train evaluation: `scripts/colab/30_eval.sh`
 - Colab execution plan: `docs/COLAB_PLAN.md`
 
+Kaggle wrappers are included for direct notebook execution:
+
+- Setup: `scripts/kaggle/00_setup.sh`
+- Restore partial data checkpoint: `scripts/kaggle/05_restore_data.sh`
+- DTR dataset generation (resume-safe): `scripts/kaggle/10_generate_dataset.sh`
+- SFT training (LoRA): `scripts/kaggle/20_train_sft.sh`
+- Upload artifacts to HF: `scripts/kaggle/40_upload_hf.sh`
+- Post-train evaluation: `scripts/kaggle/30_eval.sh`
+- Kaggle execution plan: `docs/KAGGLE_PLAN.md`
+
 Quick start on RunPod:
 
 ```bash
