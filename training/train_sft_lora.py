@@ -6,6 +6,7 @@ Trains LoRA adapters on JSONL rows with fields: prompt, completion.
 import os
 import argparse
 import random
+import inspect
 import numpy as np
 import torch
 from datasets import load_dataset
@@ -170,27 +171,37 @@ def main():
         train_ds = dataset
         eval_ds = None
 
-    training_args = TrainingArguments(
-        output_dir=args.output_dir,
-        per_device_train_batch_size=args.micro_batch_size,
-        per_device_eval_batch_size=args.micro_batch_size,
-        gradient_accumulation_steps=args.gradient_accumulation_steps,
-        learning_rate=args.learning_rate,
-        num_train_epochs=args.epochs,
-        weight_decay=args.weight_decay,
-        warmup_ratio=args.warmup_ratio,
-        logging_steps=args.logging_steps,
-        save_steps=args.save_steps,
-        save_total_limit=3,
-        bf16=bf16,
-        fp16=not bf16,
-        lr_scheduler_type="cosine",
-        optim="paged_adamw_8bit",
-        evaluation_strategy="steps" if eval_ds is not None else "no",
-        eval_steps=args.save_steps if eval_ds is not None else None,
-        report_to="none",
-        seed=args.seed,
-    )
+    training_kwargs = {
+        "output_dir": args.output_dir,
+        "per_device_train_batch_size": args.micro_batch_size,
+        "per_device_eval_batch_size": args.micro_batch_size,
+        "gradient_accumulation_steps": args.gradient_accumulation_steps,
+        "learning_rate": args.learning_rate,
+        "num_train_epochs": args.epochs,
+        "weight_decay": args.weight_decay,
+        "warmup_ratio": args.warmup_ratio,
+        "logging_steps": args.logging_steps,
+        "save_steps": args.save_steps,
+        "save_total_limit": 3,
+        "bf16": bf16,
+        "fp16": not bf16,
+        "lr_scheduler_type": "cosine",
+        "optim": "paged_adamw_8bit",
+        "report_to": "none",
+        "seed": args.seed,
+    }
+
+    sig = inspect.signature(TrainingArguments.__init__)
+    eval_strategy_value = "steps" if eval_ds is not None else "no"
+    if "evaluation_strategy" in sig.parameters:
+        training_kwargs["evaluation_strategy"] = eval_strategy_value
+    elif "eval_strategy" in sig.parameters:
+        training_kwargs["eval_strategy"] = eval_strategy_value
+
+    if eval_ds is not None and "eval_steps" in sig.parameters:
+        training_kwargs["eval_steps"] = args.save_steps
+
+    training_args = TrainingArguments(**training_kwargs)
 
     collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
 
