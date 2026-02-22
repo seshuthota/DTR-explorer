@@ -36,9 +36,10 @@ Verify:
 ```
 
 ## 4) Resume Generation
-Default Kaggle profile:
-- `SAMPLE_BATCH_SIZE=8`
-- `MAX_NEW_TOKENS=384`
+Default Kaggle profile is auto-selected by VRAM (`AUTO_PROFILE=1`) and uses strict keep rules:
+- `require_correct=1`
+- `require_boxed=1`
+- `exclude_truncated=1`
 - `TEMPERATURE=0.5`, `TOP_K=20`
 
 ```bash
@@ -46,15 +47,23 @@ Default Kaggle profile:
   bash scripts/kaggle/10_generate_dataset.sh
 ```
 
-Higher quality (slower) option:
+Manual override example:
 ```bash
-!QUESTIONS=200 SAMPLES_PER_Q=16 RESUME=1 SAMPLE_BATCH_SIZE=8 MAX_NEW_TOKENS=512 \
+!AUTO_PROFILE=0 QUESTIONS=200 SAMPLES_PER_Q=16 RESUME=1 SAMPLE_BATCH_SIZE=16 MAX_NEW_TOKENS=448 DTR_MAX_TOKENS=224 \
   bash scripts/kaggle/10_generate_dataset.sh
 ```
 
 ## 5) Train LoRA
 ```bash
 !DATASET_PATH=data/dtr_filtered_sft.jsonl \
+  OUT_DIR=models/dtr-tuned-1.2b-kaggle \
+  bash scripts/kaggle/20_train_sft.sh
+```
+
+Manual override example:
+```bash
+!AUTO_PROFILE=0 MAX_SEQ_LEN=768 MICRO_BATCH=2 GRAD_ACCUM=8 EPOCHS=1 \
+  DATASET_PATH=data/dtr_filtered_sft.jsonl \
   OUT_DIR=models/dtr-tuned-1.2b-kaggle \
   bash scripts/kaggle/20_train_sft.sh
 ```

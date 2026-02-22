@@ -118,6 +118,11 @@ Kaggle wrappers are included for direct notebook execution:
 - Post-train evaluation: `scripts/kaggle/30_eval.sh`
 - Kaggle execution plan: `docs/KAGGLE_PLAN.md`
 
+Notes on speed/quality defaults in Colab/Kaggle scripts:
+- Auto-profile (`AUTO_PROFILE=1`) selects generation/training settings by detected VRAM.
+- Dataset filtering defaults are strict for SFT quality: `require_correct=1`, `require_boxed=1`, `exclude_truncated=1`.
+- Fast DTR option (`DTR_MAX_TOKENS`) is used to reduce scoring overhead while preserving ranking quality.
+
 Quick start on RunPod:
 
 ```bash

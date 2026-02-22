@@ -27,9 +27,9 @@ Then verify:
 ```
 
 ## 3) Resume Generation (Colab-safe defaults)
-Defaults are tuned for ~15-16GB VRAM:
-- `SAMPLE_BATCH_SIZE=1`
-- `MAX_NEW_TOKENS=224`
+Defaults are auto-profiled by VRAM (`AUTO_PROFILE=1`):
+- strict filter: `require_correct=1`, `require_boxed=1`, `exclude_truncated=1`
+- speed profile sets `SAMPLE_BATCH_SIZE`, `MAX_NEW_TOKENS`, `DTR_MAX_TOKENS`
 - `RESUME=1`
 
 ```bash
@@ -37,15 +37,26 @@ Defaults are tuned for ~15-16GB VRAM:
   bash scripts/colab/10_generate_dataset.sh
 ```
 
-If GPU memory is stable, try `SAMPLE_BATCH_SIZE=2` for more throughput.
+Manual override example (if you want to force larger parallelism):
+```bash
+!AUTO_PROFILE=0 SAMPLE_BATCH_SIZE=16 MAX_NEW_TOKENS=448 DTR_MAX_TOKENS=224 \
+  QUESTIONS=200 SAMPLES_PER_Q=16 RESUME=1 \
+  bash scripts/colab/10_generate_dataset.sh
+```
 
 ## 4) Train LoRA (Colab-safe defaults)
-Defaults are conservative:
-- `MAX_SEQ_LEN=768`, `MICRO_BATCH=1`, `GRAD_ACCUM=16`
-- `LORA_R=8`, `LORA_ALPHA=16`, `EPOCHS=1`
+Defaults are auto-profiled by VRAM (`AUTO_PROFILE=1`) and disable in-train eval for speed.
 
 ```bash
 !DATASET_PATH=data/dtr_filtered_sft.jsonl \
+  OUT_DIR=models/dtr-tuned-1.2b-colab \
+  bash scripts/colab/20_train_sft.sh
+```
+
+Manual override example:
+```bash
+!AUTO_PROFILE=0 MAX_SEQ_LEN=768 MICRO_BATCH=2 GRAD_ACCUM=8 EPOCHS=1 \
+  DATASET_PATH=data/dtr_filtered_sft.jsonl \
   OUT_DIR=models/dtr-tuned-1.2b-colab \
   bash scripts/colab/20_train_sft.sh
 ```

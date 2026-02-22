@@ -43,11 +43,20 @@ class DTRCalculator:
         jsd = 0.5 * kl_p_m + 0.5 * kl_q_m
         return float(jsd.detach().cpu().item())
         
-    def calculate_dtr_for_sequence(self, hidden_states_list, return_depths=False, return_top_k_depths=False):
+    def calculate_dtr_for_sequence(
+        self,
+        hidden_states_list,
+        return_depths=False,
+        return_top_k_depths=False,
+        max_tokens=None,
+    ):
         """
         Calculates the overall Deep-Thinking Ratio for a generated response.
         """
         T = len(hidden_states_list)
+        if max_tokens is not None and max_tokens > 0:
+            T = min(T, int(max_tokens))
+            hidden_states_list = hidden_states_list[:T]
         if T == 0:
             if return_depths and return_top_k_depths:
                 return 0.0, [], []

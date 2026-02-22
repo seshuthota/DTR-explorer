@@ -19,10 +19,13 @@ OUTPUT_JSONL="${OUTPUT_JSONL:-data/dtr_filtered_sft.jsonl}"
 OUTPUT_CSV="${OUTPUT_CSV:-data/dtr_candidates_debug.csv}"
 STATE_PATH="${STATE_PATH:-${OUTPUT_JSONL}.state.json}"
 LOG_EVERY="${LOG_EVERY:-1}"
+DTR_MAX_TOKENS="${DTR_MAX_TOKENS:-0}"
 RESUME="${RESUME:-0}"
 OVERWRITE="${OVERWRITE:-0}"
 REQUIRE_CORRECT="${REQUIRE_CORRECT:-1}"
 FALLBACK_BEST_CORRECT="${FALLBACK_BEST_CORRECT:-1}"
+REQUIRE_BOXED="${REQUIRE_BOXED:-0}"
+EXCLUDE_TRUNCATED="${EXCLUDE_TRUNCATED:-0}"
 
 EXTRA_FLAGS=()
 if [[ "$RESUME" == "1" ]]; then
@@ -37,6 +40,12 @@ fi
 if [[ "$FALLBACK_BEST_CORRECT" == "1" ]]; then
   EXTRA_FLAGS+=(--fallback-best-correct)
 fi
+if [[ "$REQUIRE_BOXED" == "1" ]]; then
+  EXTRA_FLAGS+=(--require-boxed)
+fi
+if [[ "$EXCLUDE_TRUNCATED" == "1" ]]; then
+  EXTRA_FLAGS+=(--exclude-truncated)
+fi
 
 python -u experiments/generate_dtr_dataset.py \
   --questions "$QUESTIONS" \
@@ -47,6 +56,7 @@ python -u experiments/generate_dtr_dataset.py \
   --top-k "$TOP_K" \
   --min-dtr "$MIN_DTR" \
   --keep-per-q "$KEEP_PER_Q" \
+  --dtr-max-tokens "$DTR_MAX_TOKENS" \
   --log-every "$LOG_EVERY" \
   --state-path "$STATE_PATH" \
   --output "$OUTPUT_JSONL" \

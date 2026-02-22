@@ -8,6 +8,7 @@ import os
 import sys
 import json
 import csv
+import re
 import argparse
 import statistics
 
@@ -125,6 +126,10 @@ def extract_hidden_states_for_batch_item(outputs, batch_idx):
     return hidden_states_list
 
 
+def has_boxed_answer(text):
+    return bool(re.search(r"\\boxed\{.+?\}", text))
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", type=str, default="gsm8k", help="HF dataset name (or gsm8k)")
@@ -145,7 +150,10 @@ def main():
     parser.add_argument("--min-dtr", type=float, default=0.32)
     parser.add_argument("--keep-per-q", type=int, default=4)
     parser.add_argument("--require-correct", action="store_true", help="Keep only traces with correct final answer")
+    parser.add_argument("--require-boxed", action="store_true", help="Keep only traces that include a boxed final answer")
+    parser.add_argument("--exclude-truncated", action="store_true", help="Exclude traces that hit max_new_tokens")
     parser.add_argument("--fallback-best-correct", action="store_true", help="If no trace passes filters, keep best correct trace")
+    parser.add_argument("--dtr-max-tokens", type=int, default=0, help="If >0, compute DTR only on the first N generated tokens")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--system-prompt", type=str, default="You are a helpful assistant.")
     parser.add_argument("--output", type=str, default="data/dtr_filtered_sft.jsonl")
@@ -167,6 +175,8 @@ def main():
         raise ValueError("--log-every must be >= 1")
     if args.sample_batch_size < 1:
         raise ValueError("--sample-batch-size must be >= 1")
+    if args.dtr_max_tokens < 0:
+        raise ValueError("--dtr-max-tokens must be >= 0")
 
     state_path = args.state_path or f"{args.output}.state.json"
 
@@ -220,6 +230,10 @@ def main():
             row["question_idx"] = int(row["question_idx"])
         if isinstance(row.get("sample_idx"), str):
             row["sample_idx"] = int(row["sample_idx"])
+        if isinstance(row.get("has_boxed"), str):
+            row["has_boxed"] = int(row["has_boxed"])
+        if isinstance(row.get("truncated"), str):
+            row["truncated"] = int(row["truncated"])
 
     for row in kept_rows:
         if isinstance(row.get("dtr"), str):
@@ -232,6 +246,10 @@ def main():
             row["question_idx"] = int(row["question_idx"])
         if isinstance(row.get("sample_idx"), str):
             row["sample_idx"] = int(row["sample_idx"])
+        if isinstance(row.get("has_boxed"), str):
+            row["has_boxed"] = int(row["has_boxed"])
+        if isinstance(row.get("truncated"), str):
+            row["truncated"] = int(row["truncated"])
 
     state = load_state(state_path) if args.resume else None
     completed_questions = set(state.get("completed_questions", [])) if state else set()
@@ -284,13 +302,20 @@ def main():
                 run_seed = args.seed + (q_idx * 10000) + s_idx
 
                 hidden_states_list = extract_hidden_states_for_batch_item(outputs, b_idx)
-                dtr_value = float(calculator.calculate_dtr_for_sequence(hidden_states_list))
+                dtr_value = float(
+                    calculator.calculate_dtr_for_sequence(
+                        hidden_states_list,
+                        max_tokens=(args.dtr_max_tokens if args.dtr_max_tokens > 0 else None),
+                    )
+                )
 
                 new_ids = outputs.sequences[b_idx][prompt_length:]
                 completion = dtr_model.tokenizer.decode(new_ids, skip_special_tokens=True)
                 pred = normalize_answer(extract_answer_from_text(completion))
                 correct = int((pred is not None) and (gold is not None) and (pred == gold))
                 length_tokens = int(new_ids.shape[0])
+                has_boxed = int(has_boxed_answer(completion))
+                truncated = int(length_tokens >= args.max_new_tokens)
 
                 row = {
                     "question_idx": q_idx,
@@ -299,6 +324,8 @@ def main():
                     "dtr": dtr_value,
                     "length_tokens": length_tokens,
                     "correct": correct,
+                    "has_boxed": has_boxed,
+                    "truncated": truncated,
                     "gold": gold if gold is not None else "",
                     "pred": pred if pred is not None else "",
                     "prompt": prompt,
@@ -313,6 +340,8 @@ def main():
                         "dtr": dtr_value,
                         "length_tokens": length_tokens,
                         "correct": correct,
+                        "has_boxed": has_boxed,
+                        "truncated": truncated,
                         "gold": row["gold"],
                         "pred": row["pred"],
                     }
@@ -320,18 +349,27 @@ def main():
                 if (s_idx + 1) % args.log_every == 0 or (s_idx + 1) == args.samples_per_q:
                     print(
                         f"[{done:5d}/{total_to_run}] q={q_idx:03d} s={s_idx:02d} "
-                        f"dtr={dtr_value:.3f} len={length_tokens:3d} correct={correct}"
+                        f"dtr={dtr_value:.3f} len={length_tokens:3d} "
+                        f"correct={correct} boxed={has_boxed} trunc={truncated}"
                     )
 
         # Apply filters and retain top candidates per question.
         filtered = [
             r for r in q_candidates
-            if (r["dtr"] >= args.min_dtr) and ((not args.require_correct) or r["correct"] == 1)
+            if (r["dtr"] >= args.min_dtr)
+            and ((not args.require_correct) or r["correct"] == 1)
+            and ((not args.require_boxed) or r["has_boxed"] == 1)
+            and ((not args.exclude_truncated) or r["truncated"] == 0)
         ]
         filtered.sort(key=lambda r: r["dtr"], reverse=True)
 
         if (not filtered) and args.fallback_best_correct:
-            correct_only = [r for r in q_candidates if r["correct"] == 1]
+            correct_only = [
+                r for r in q_candidates
+                if (r["correct"] == 1)
+                and ((not args.require_boxed) or r["has_boxed"] == 1)
+                and ((not args.exclude_truncated) or r["truncated"] == 0)
+            ]
             correct_only.sort(key=lambda r: r["dtr"], reverse=True)
             filtered = correct_only[:1]
 
@@ -346,6 +384,8 @@ def main():
                     "dtr": r["dtr"],
                     "length_tokens": r["length_tokens"],
                     "correct": r["correct"],
+                    "has_boxed": r["has_boxed"],
+                    "truncated": r["truncated"],
                     "gold": r["gold"],
                     "pred": r["pred"],
                     "question_idx": r["question_idx"],
@@ -365,6 +405,8 @@ def main():
                 "dtr",
                 "length_tokens",
                 "correct",
+                "has_boxed",
+                "truncated",
                 "gold",
                 "pred",
             ],
@@ -388,7 +430,8 @@ def main():
 
         print(
             f"  -> kept {len(keep)}/{args.samples_per_q} "
-            f"(min_dtr={args.min_dtr:.3f}, require_correct={args.require_correct})"
+            f"(min_dtr={args.min_dtr:.3f}, require_correct={args.require_correct}, "
+            f"require_boxed={args.require_boxed}, exclude_truncated={args.exclude_truncated})"
         )
 
     all_dtrs = [float(r["dtr"]) for r in candidate_rows]
@@ -409,6 +452,14 @@ def main():
         sum(int(r["correct"]) for r in kept_rows) / len(kept_rows)
         if kept_rows else 0.0
     )
+    boxed_rate = (
+        sum(int(r.get("has_boxed", 0)) for r in kept_rows) / len(kept_rows)
+        if kept_rows else 0.0
+    )
+    kept_trunc_rate = (
+        sum(int(r.get("truncated", 0)) for r in kept_rows) / len(kept_rows)
+        if kept_rows else 0.0
+    )
 
     print("\n=== DTR Dataset Summary ===")
     print(f"Questions: {len(samples)}")
@@ -419,6 +470,8 @@ def main():
     print(f"Mean DTR (all): {mean_all_dtr:.3f}")
     print(f"Mean DTR (kept): {mean_kept_dtr:.3f}")
     print(f"Kept correctness rate: {kept_acc:.2%}")
+    print(f"Kept boxed-answer rate: {boxed_rate:.2%}")
+    print(f"Kept truncated rate: {kept_trunc_rate:.2%}")
     print(f"SFT output: {args.output}")
     print(f"Debug candidates CSV: {args.candidates_out}")
     print(f"State checkpoint: {state_path}")
