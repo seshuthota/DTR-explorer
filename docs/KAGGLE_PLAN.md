@@ -29,6 +29,16 @@ If you uploaded a `.tar.gz` archive:
   bash scripts/kaggle/05_restore_data.sh
 ```
 
+Or restore directly from a HF Dataset repo:
+```bash
+import os
+os.environ["HF_TOKEN"] = "hf_xxx"  # optional for private repo
+```
+```bash
+!HF_REPO_ID=username/dtr-generated-data-v1 \
+  bash scripts/kaggle/06_restore_data_from_hf.sh
+```
+
 Verify:
 ```bash
 !ls -lah data
@@ -94,6 +104,12 @@ os.environ["HF_TOKEN"] = "hf_xxx"
 !HF_REPO_ID=username/dtr-tuned-1.2b-kaggle-lora \
   LOCAL_DIR=models/dtr-tuned-1.2b-kaggle \
   bash scripts/kaggle/40_upload_hf.sh
+```
+
+Upload generation dataset checkpoint (for resume later):
+```bash
+!HF_REPO_ID=username/dtr-generated-data-v1 \
+  bash scripts/kaggle/41_upload_dataset_hf.sh
 ```
 
 ## 8) Optional Eval

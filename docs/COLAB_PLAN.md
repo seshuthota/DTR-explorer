@@ -26,6 +26,16 @@ Then verify:
 !wc -l data/dtr_filtered_sft.jsonl data/dtr_candidates_debug.csv
 ```
 
+Or restore directly from a HF Dataset repo:
+```python
+import os
+os.environ["HF_TOKEN"] = "hf_xxx"  # optional for private repo
+```
+```bash
+!HF_REPO_ID=username/dtr-generated-data-v1 \
+  bash scripts/colab/06_restore_data_from_hf.sh
+```
+
 ## 3) Resume Generation (Colab-safe defaults)
 Defaults are auto-profiled by VRAM (`AUTO_PROFILE=1`):
 - strict filter: `require_correct=1`, `require_boxed=1`, `exclude_truncated=1`
@@ -71,6 +81,12 @@ os.environ["HF_TOKEN"] = "hf_xxx"
 !HF_REPO_ID=username/dtr-tuned-1.2b-colab-lora \
   LOCAL_DIR=models/dtr-tuned-1.2b-colab \
   bash scripts/colab/40_upload_hf.sh
+```
+
+Upload generation dataset checkpoint (for resume later):
+```bash
+!HF_REPO_ID=username/dtr-generated-data-v1 \
+  bash scripts/colab/41_upload_dataset_hf.sh
 ```
 
 ## 6) Optional Quick Eval
