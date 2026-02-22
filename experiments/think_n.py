@@ -12,6 +12,7 @@ Compares against full self-consistency (Cons@n) with token-cost accounting.
 import os
 import sys
 import csv
+import json
 import argparse
 import numpy as np
 import torch
@@ -50,9 +51,11 @@ def run_full_consistency(
     top_p,
     seed_base,
     system_prompt,
+    return_traces=False,
 ):
     predictions = []
     generated_lengths = []
+    traces = [] if return_traces else None
 
     for i in range(n):
         set_seed(seed_base + i)
@@ -68,17 +71,30 @@ def run_full_consistency(
             output_hidden_states=False,
         )
         new_ids = outputs.sequences[0][prompt_length:]
-        pred, _ = decode_prediction(dtr_model.tokenizer, new_ids)
+        pred, text = decode_prediction(dtr_model.tokenizer, new_ids)
         predictions.append(pred)
         generated_lengths.append(int(new_ids.shape[0]))
+        if return_traces:
+            traces.append(
+                {
+                    "idx": i,
+                    "seed": seed_base + i,
+                    "prediction": pred if pred is not None else "",
+                    "length_tokens": int(new_ids.shape[0]),
+                    "text": text,
+                }
+            )
 
     vote = majority_vote(predictions)
-    return {
+    result = {
         "vote": vote,
         "predictions": predictions,
         "token_cost": int(sum(generated_lengths)),
         "mean_len": float(np.mean(generated_lengths)) if generated_lengths else 0.0,
     }
+    if return_traces:
+        result["traces"] = traces
+    return result
 
 
 def run_think_n(
@@ -94,6 +110,7 @@ def run_think_n(
     top_p,
     seed_base,
     system_prompt,
+    return_traces=False,
 ):
     inputs, prompt_len, _ = dtr_model.prepare_inputs(prompt, system_prompt=system_prompt)
     prompt_ids = inputs["input_ids"]
@@ -139,11 +156,13 @@ def run_think_n(
     keep_n = max(1, int(round(n * keep_ratio)))
     keep_n = min(keep_n, n)
     selected = sorted(prefix_rows, key=lambda x: x["prefix_dtr"], reverse=True)[:keep_n]
+    selected_idx_set = {r["idx"] for r in selected}
 
     # Stage 2: continue only selected candidates to full budget.
     continued_predictions = []
     continuation_token_cost = 0
     final_lengths = []
+    selected_traces = [] if return_traces else None
 
     for row in selected:
         prefix_ids = row["prefix_ids"].to(prompt_ids.device)
@@ -171,13 +190,24 @@ def run_think_n(
             continuation_ids = cont_outputs.sequences[0][context_ids.shape[1]:]
 
         final_ids = torch.cat([prefix_ids, continuation_ids], dim=0)
-        pred, _ = decode_prediction(dtr_model.tokenizer, final_ids)
+        pred, text = decode_prediction(dtr_model.tokenizer, final_ids)
         continued_predictions.append(pred)
         continuation_token_cost += int(continuation_ids.shape[0])
         final_lengths.append(int(final_ids.shape[0]))
+        if return_traces:
+            selected_traces.append(
+                {
+                    "idx": int(row["idx"]),
+                    "seed": int(row["seed"]),
+                    "prefix_dtr": float(row["prefix_dtr"]),
+                    "prediction": pred if pred is not None else "",
+                    "length_tokens": int(final_ids.shape[0]),
+                    "text": text,
+                }
+            )
 
     vote = majority_vote(continued_predictions)
-    return {
+    result = {
         "vote": vote,
         "selected_n": keep_n,
         "prefix_cost": int(prefix_token_cost),
@@ -186,6 +216,21 @@ def run_think_n(
         "mean_selected_prefix_dtr": float(np.mean([r["prefix_dtr"] for r in selected])) if selected else 0.0,
         "mean_len": float(np.mean(final_lengths)) if final_lengths else 0.0,
     }
+    if return_traces:
+        prefix_traces = []
+        for r in prefix_rows:
+            prefix_traces.append(
+                {
+                    "idx": int(r["idx"]),
+                    "seed": int(r["seed"]),
+                    "prefix_len": int(r["prefix_len"]),
+                    "prefix_dtr": float(r["prefix_dtr"]),
+                    "selected": int(r["idx"] in selected_idx_set),
+                }
+            )
+        result["prefix_traces"] = prefix_traces
+        result["selected_traces"] = selected_traces
+    return result
 
 
 def main():
@@ -197,6 +242,7 @@ def main():
     parser.add_argument("--question-field", type=str, default="question")
     parser.add_argument("--answer-field", type=str, default="answer")
     parser.add_argument("--questions", type=int, default=30)
+    parser.add_argument("--question-offset", type=int, default=0, help="Start index within selected split")
     parser.add_argument("--n", type=int, default=24, help="Samples for Cons@n / Think@n")
     parser.add_argument("--keep-ratio", type=float, default=0.5, help="Fraction kept after prefix ranking")
     parser.add_argument("--prefix-tokens", type=int, default=50)
@@ -209,6 +255,7 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--system-prompt", type=str, default="You are a helpful assistant.")
     parser.add_argument("--csv-out", type=str, default="")
+    parser.add_argument("--trace-jsonl", type=str, default="", help="Optional per-question detailed trace output")
     args = parser.parse_args()
 
     if args.dataset == "gsm8k" and args.dataset_config == "main":
@@ -219,15 +266,19 @@ def main():
         dataset_config = args.dataset_config if args.dataset_config else None
 
     print("Loading samples...")
-    samples = load_qa_samples(
+    if args.question_offset < 0:
+        raise ValueError("--question-offset must be >= 0")
+
+    raw_samples = load_qa_samples(
         dataset=args.dataset,
         split=args.split,
-        limit=args.questions,
+        limit=args.question_offset + args.questions,
         dataset_jsonl=args.dataset_jsonl,
         question_field=args.question_field,
         answer_field=args.answer_field,
         dataset_config=dataset_config,
     )
+    samples = raw_samples[args.question_offset: args.question_offset + args.questions]
     print(f"Loaded {len(samples)} questions.")
 
     print("Initializing model and DTR calculator...")
@@ -240,12 +291,14 @@ def main():
     )
 
     rows = []
+    trace_rows = []
     cons_correct = []
     think_correct = []
     cons_costs = []
     think_costs = []
 
-    for q_idx, sample in enumerate(samples):
+    for local_idx, sample in enumerate(samples):
+        q_idx = args.question_offset + local_idx
         question = sample["question"]
         gold = normalize_answer(sample["answer"])
         prompt = build_prompt(question)
@@ -261,6 +314,7 @@ def main():
             top_p=args.top_p,
             seed_base=question_seed,
             system_prompt=args.system_prompt,
+            return_traces=bool(args.trace_jsonl),
         )
 
         think = run_think_n(
@@ -276,6 +330,7 @@ def main():
             top_p=args.top_p,
             seed_base=question_seed,
             system_prompt=args.system_prompt,
+            return_traces=bool(args.trace_jsonl),
         )
 
         cons_ok = int(cons["vote"] == gold)
@@ -311,6 +366,31 @@ def main():
                 "mean_selected_prefix_dtr": think["mean_selected_prefix_dtr"],
             }
         )
+        if args.trace_jsonl:
+            trace_rows.append(
+                {
+                    "question_idx": q_idx,
+                    "question": question,
+                    "gold": gold if gold is not None else "",
+                    "cons": {
+                        "vote": cons["vote"] if cons["vote"] is not None else "",
+                        "correct": cons_ok,
+                        "token_cost": cons_cost,
+                        "samples": cons.get("traces", []),
+                    },
+                    "think": {
+                        "vote": think["vote"] if think["vote"] is not None else "",
+                        "correct": think_ok,
+                        "token_cost": think_cost,
+                        "selected_n": think["selected_n"],
+                        "prefix_cost": think["prefix_cost"],
+                        "continuation_cost": think["continuation_cost"],
+                        "mean_selected_prefix_dtr": think["mean_selected_prefix_dtr"],
+                        "prefixes": think.get("prefix_traces", []),
+                        "selected_samples": think.get("selected_traces", []),
+                    },
+                }
+            )
 
     cons_acc = float(np.mean(cons_correct)) if cons_correct else float("nan")
     think_acc = float(np.mean(think_correct)) if think_correct else float("nan")
@@ -336,6 +416,15 @@ def main():
             writer.writeheader()
             writer.writerows(rows)
         print(f"Saved detailed rows to: {args.csv_out}")
+
+    if args.trace_jsonl:
+        out_dir = os.path.dirname(args.trace_jsonl)
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+        with open(args.trace_jsonl, "w", encoding="utf-8") as f:
+            for row in trace_rows:
+                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+        print(f"Saved trace rows to: {args.trace_jsonl}")
 
 
 if __name__ == "__main__":
